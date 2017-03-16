@@ -8,8 +8,7 @@ library(roxygen2)
 current.code <- as.package("FitR")
 load_all(current.code)
 document(current.code)
-test(current.code)
 
 
 
-
+fitstat(testy, testP)
