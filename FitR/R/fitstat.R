@@ -1,93 +1,81 @@
 #' Calculate Fit Statistics
 #'
-#' Finds fit statistics given a matrix of predicted values and either a vector
-#' of test data or a vector of naive predictions, or both
+#' Finds fit statistics given a matrix of predicted values and a vector
+#' of test data. Providing a vector of naive predictions allows for the inclusion
+#' of MRAE in fit statistic calculations. Note that NA values are case-wise deleted.
 #'
 #' @param y A vector of test data values
 #' @param P A matrix of predicted values
 #' @param r A vector of naive estimates
-#' @param fits A vector of capitalized fit statistic abbreviations as strings. 
-#' Possible values include RMSE, MAD, RMSLE, MAPE, MEAPE, and MRAE (for use with
-#' r) 
+#' @param HideFits A vector of fit statistics the user wants suppressed from the output. abbreviations as strings. 
+#' Possible values include RMSE, MAD, RMSLE, MAPE, MEAPE, and MRAE (hidden by default since 
+#' it is for use with the r argument only) 
 #'
-#' @return An matrix of fit statistic values, where rows are models and columns 
+#' @return A matrix of fit statistic values, where rows are models and columns 
 #' are fit statistics
 #' @author Ryden W. Butler
 #' @rdname fitstats
 #' @export
-setGeneric(name="fitstat",
-           def=function(y=NULL, P, r=NULL, fits=c('RMSE', 'MAD', 'RMSLE', 'MAPE', 'MEAPE'), ...)
-           {standardGeneric("fitstat")}
-)
-
-#' @export
-setMethod(f="fitstat",
-          definition=function(y=NULL, P, r=NULL, 
-                              fits=c('RMSE', 'MAD', 'RMSLE', 'MAPE', 'MEAPE'), ...){
-            return(fitstats(y, P, r, fits, ...))
-          }
-)
-
-fitstats <- function(y = NULL, P, r = NULL, 
-                     fits = c('RMSE', 'MAD', 'RMSLE', 'MAPE', 'MEAPE')) {
-  if (is.null(y) & is.null(r)) return()
-  if (!is.null(r)) {
-    HandleNAs <- na.omit(cbind(P, y, r))
-    y <- HandleNAs[ , (ncol(HandleNAs)-1)]
-    # because y takes on values of 0, this results in infinity
-    # values in the average percent error
-    y <- y + .1
-    r <- HandleNAs[ , ncol(HandleNAs)]
-    # because r takes on values of 0, this results in infinity
-    # values in the average percent error
-    r <- r + .1
-    P <- HandleNAs[ ,-c(ncol(HandleNAs), ncol(HandleNAs)-1)]
-  }
-  HandleNAs <- na.omit(cbind(P, y))
-  y <- HandleNAs[ , ncol(HandleNAs)]
-  # because y takes on values of 0, this results in infinity
-  # values in the average percent error
-  y <- y + .1
-  P <- HandleNAs[ ,-c(ncol(HandleNAs), ncol(HandleNAs)-1)]
- 
-  # calculate individual errors
-  e <- abs(P - y)
-  # produces some huge values b/c 0s in y
-  a <- (e/abs(y))*100
-  if (!is.null(r)) b <- abs(r - y)
+fitstats <- function(y, P, r = NULL, HideFits = c('MRAE')) {
+  # Check if inputs are of proper class
+  if (!is.vector(y)) stop('y must be a vector')
+  if (!is.matrix(P)) stop('P must be a matrix')
+  if (!is.null(r) & !is.vector(r)) stop('r must either be NULL (by default) or a vector')
+  # Combine test data, predictions, and naive estimates in matrix
+  # If r is null, the cbind command will naturally ignore it
+  HandleNAs <- cbind(P, y, r)
+  # Check which rows have NA values
+  NARows <- which(is.na(HandleNAs), arr.ind=T)[ , 1]
   
+  # Remove NA rows if necessary
+  if(length(NARows) != 0){
+    y <- y[-NARows]
+    P <- as.matrix(P[-NARows, ])
+    r <- r[-NARows]
+  }
+  # Create matrix to store output, with corresponding model names
+  # The leading column is removed in the function return
   output <- matrix(NA, nrow = ncol(P), ncol = 1)
   rownames(output) <- colnames(P)
   
-  # calculate fit statistics
-  if ('RMSE' %in% fits) {
+  # Calculate absolute error
+  e <- abs(P - y)
+  # Calcualte absolute percent error
+  a <- (e/abs(y))*100
+  
+  # Calculate fit statistics
+  if (!('RMSE' %in% HideFits)) {
     RMSE <- sqrt(apply(e, 2, function(x) sum(x^2))/nrow(e))
     output <- cbind(output, RMSE)
   }
-  if ('MAD' %in% fits) {
+  if (!('MAD' %in% HideFits)) {
     MAD <- apply(e , 2, median)
     output <- cbind(output, MAD)
   }
-  if ('RMSLE' %in% fits) {
+  if (!('RMSLE' %in% HideFits)) {
     RMSLE <- sqrt(apply(P, 2, function(x) sum(log(x + 1) - log(y + 1))^2)/nrow(P))
     output <- cbind(output, RMSLE)
   }
-  if ('MAPE' %in% fits) {
+  if (!('MAPE' %in% HideFits)) {
     MAPE <- apply(a, 2, sum)/nrow(a)
+    if(sum(MAPE > 100) > 0){
+      warning(paste('Large MAPE values caused by 0 values in test data.\n  Consider using other fit statistics.'))
+    }
     output <- cbind(output, MAPE)
   }
-  if ('MEAPE' %in% fits) {
+  if (!('MEAPE' %in% HideFits)) {
     MEAPE <- apply(a, 2, median)
     output <- cbind(output, MEAPE)
   }
-  if ('MRAE' %in% fits & !is.null(r)) {
-    MRAE <- apply(e, 2, function(x) median(e/x))
+  # Check whether user has asked to suppress MRAE and if they have provided r
+  if (!('MRAE' %in% HideFits) & !is.null(r)) {
+    b <- abs(r - y)
+    MRAE <- apply(e, 2, function(x) median(x/b))
     output <- cbind(output, MRAE)
   }
-  if ('MRAE' %in% fits & is.null(r)) {
-    print('Must pass a vector of naive estimates to r for MRAE.')
+  # Prints error message if they want MRAE and r is null
+  if (!('MRAE' %in% HideFits) & is.null(r)) {
+    stop('Must pass a vector of naive estimates to argument r for MRAE.')
   }
-  
   return(output[, -1])
 }
-
